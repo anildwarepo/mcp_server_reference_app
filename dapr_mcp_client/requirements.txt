@@ -1,0 +1,9 @@
+azure-cosmos
+openai
+azure-identity
+python-dotenv
+aiohttp
+mcp[cli]
+dapr-ext-fastapi
+isodate
+semantic-kernel
