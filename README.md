@@ -1,3 +1,6 @@
+## MCP Server StreamableHttp Architecture
+![architecture](architecture.png)
+
 ## MCP Server on Dapr
 
 ```
@@ -22,6 +25,6 @@ npm run dev
 
 ## Demo
 
-![alt text](image.png)
+![demo1](demo1.png)
 
-![alt text](image-1.png)
+![demo2](demo2.png)
