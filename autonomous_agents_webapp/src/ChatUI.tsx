@@ -182,7 +182,8 @@ export default function ChatUI() {
       <main className="max-w-5xl mx-auto w-full px-4 py-6">
         <Card className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.06] shadow-2xl">
           <CardContent className="p-0">
-            <ScrollArea className="h-[calc(100dvh-260px)]">
+            <ScrollArea className="h-[calc(100dvh-260px)] overflow-x-hidden">
+
               <div
                 className="p-6 space-y-6"
                 ref={(el) => {
@@ -204,40 +205,79 @@ export default function ChatUI() {
                     return null;
                   }
                   return (
-                      <div key={idx} className="flex items-start gap-2">
-                        {/* Assistant avatar (left) */}
+                    <div
+                        key={idx}
+                        className="flex w-full min-w-0 items-start gap-2 overflow-x-hidden" // ⬅️ important
+                      >
+                      {/* Left avatar slot (48px). Show only for assistant; keep spacer for user. */}
+                      <div className="w-12 flex-shrink-0 flex justify-start">
                         {!isUser && (
-                          <div className="shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-slate-600 ring-1 ring-white/10 shadow" />
-                        )}
-
-                        {/* Bubble wrapper: can shrink but not collapse */}
-                        <div className={`min-w-0 flex-1 ${isUser ? "ml-auto" : ""}`}>
-                          <div
-                              className={[
-                                "relative isolate rounded-2xl px-4 py-3 shadow-lg ring-1 text-left",
-                                "min-w-[4rem] max-w-[55%] md:max-w-[45%]", // ensures a sensible minimum
-                                "whitespace-pre-wrap break-words leading-relaxed", // lets text wrap naturally
-                                isUser
-                                  ? "bg-gradient-to-br from-slate-600 to-slate-700 text-white ring-white/5 ml-auto"
-                                  : "bg-gradient-to-br from-indigo-600 to-slate-700 text-white ring-white/5",
-                              ].join(" ")}
-                            >
-                            {tableMode ? (
-                                  <div className="w-full max-w-full overflow-x-auto">
-                                    <SafeHTML html={clean} />
-                                  </div>
-                                ) : (
-                                  <div className="max-w-[70ch]">{isHtml(clean) ? <SafeHTML html={clean} /> : <span>{msg.content}</span>}</div>
-                                )}
-                              </div>
-                        </div>
-
-                        {/* User avatar (right) */}
-                        {isUser && (
-                          <div className="shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 ring-1 ring-white/10 shadow" />
+                          <div className="h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-slate-600 ring-1 ring-white/10 shadow" />
                         )}
                       </div>
-                    );
+
+                      {/* Bubble column (shrinks safely) */}
+                      <div
+                          className={[
+                            "min-w-0 flex-1 flex",                     // ⬅️ can shrink
+                            isUser ? "justify-end" : "justify-start",
+                          ].join(" ")}
+                        >
+                          <div
+                            className={[
+                              "relative isolate rounded-2xl px-4 py-3 shadow-lg ring-1 text-left",
+                              "inline-flex items-start min-w-0",       // ⬅️ can shrink
+                              "overflow-hidden",                       // ⬅️ bubble is the clip boundary
+                              isUser ? "max-w-[85vw] md:max-w-[58%]" : "max-w-[90vw] md:max-w-[68%]",
+                              isUser
+                                ? "bg-gradient-to-br from-slate-600 to-slate-700 text-white ring-white/5"
+                                : "bg-gradient-to-br from-indigo-600 to-slate-700 text-white ring-white/5",
+                            ].join(" ")}
+                          >
+
+
+                            {tableMode ? (
+                              // TABLES: scroll horizontally inside the bubble only
+                              <div
+                                className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1"
+                                style={{ WebkitOverflowScrolling: "touch", scrollbarGutter: "stable" }}
+                                role="region"
+                                aria-label="Table content"
+                              >
+                                {/* Make the actual <table> wider than the bubble so a scrollbar appears,
+                                  but keep that width trapped by THIS wrapper. */}
+                                <div
+                                  className="
+                                    inline-block w-max align-top
+                                    [&_table]:w-max [&_table]:max-w-none [&_table]:min-w-[36rem]   /* force intrinsic width */
+                                    [&_thead_th]:text-left [&_thead_th]:font-semibold [&_thead_th]:px-3 [&_thead_th]:py-2
+                                    [&_tbody_td]:px-3 [&_tbody_td]:py-2 [&_tbody_td]:align-top
+                                    [&_td]:whitespace-nowrap
+                                    [&_code]:break-all [&_a]:break-all
+                                  "
+                                >
+                                  <SafeHTML html={clean} />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-[15px] md:text-base leading-relaxed whitespace-pre-wrap break-words max-w-[70ch]">
+                                {isHtml(clean) ? <SafeHTML html={clean} /> : <span>{msg.content}</span>}
+                              </div>
+                            )}
+
+
+                          </div>
+                        </div>
+
+
+                      {/* Right avatar slot (48px). Show only for user; keep spacer for assistant. */}
+                      <div className="w-12 flex-shrink-0 flex justify-end">
+                        {isUser && (
+                          <div className="h-9 w-9 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 ring-1 ring-white/10 shadow" />
+                        )}
+                      </div>
+                    </div>
+                  );
 
 
                 })}
