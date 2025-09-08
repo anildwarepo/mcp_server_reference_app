@@ -1,6 +1,6 @@
 import datetime
 from dapr.actor import ActorInterface, actormethod
-from common_types import BackupConfig
+from .common_types import BackupConfig
 from dataclasses import asdict
 class BackupActorInterface(ActorInterface):
 

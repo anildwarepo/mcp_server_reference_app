@@ -1,0 +1,59 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Vite + Edge",
+        "type": "msedge",
+        "request": "launch",
+        "url": "http://localhost:5173",
+        "webRoot": "${workspaceFolder}/src",
+        "breakOnLoad": true,
+        "sourceMaps": true
+      },
+      {
+            "name": "Python: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "purpose": ["debug-in-terminal"]
+        },
+        {
+            "name": "mcp client uvicorn",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "--app-dir", "..",
+                "dapr_mcp_client.dapr_mcp_client_fastapi:app",
+                "--reload",
+                "--host", "0.0.0.0",
+                "--port", "8080"
+            ],
+            "cwd": "${workspaceFolder}/dapr_mcp_client",
+            "console": "integratedTerminal",
+            "subProcess": true,
+            "justMyCode": false
+        },
+        {
+            "name": "mcp server uvicorn",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "mcp_fastapi_server:app",           
+                "--reload",               
+                "--host", "0.0.0.0",
+                "--port", "3000"
+            ],
+            "cwd": "${workspaceFolder}/dapr_cosmos_mcp_server",
+            "console": "integratedTerminal",
+            "subProcess": true,
+            "justMyCode": false,
+        }
+        
+    ]
+  }
+  

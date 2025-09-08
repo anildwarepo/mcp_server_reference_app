@@ -1,0 +1,7 @@
+
+GET http://localhost:8080/status 
+
+POST http://localhost:8080/conversation/44b40f48-ba73-4594-8f06-c5f8b5376c24?sid=44b40f48-ba73-4594-8f06-c5f8b5376c24?sid=44b40f48-ba73-4594-8f06-c5f8b5376c24
+Content-Type: application/json
+
+{"user_query": "which oppty is in prospecting", "client_id": null}

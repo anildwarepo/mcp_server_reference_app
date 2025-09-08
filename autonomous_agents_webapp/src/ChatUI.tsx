@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { API } from "./api";
-import { SafeHTML, isHtml } from "@/components/ui/safehtml";
+import { SafeHTML, sanitizeHtml, isHtml, hasTable } from "@/components/ui/safehtml";
 
 interface Message {
   role: "user" | "assistant";
@@ -33,7 +33,6 @@ export default function ChatUI() {
   const [input, setInput] = useState("");
   const [user_id] = useState(() => crypto.randomUUID());
   const [progressPct, setProgressPct] = useState<number | null>(null);
-  const [sessionId] = useState(() => crypto.randomUUID());
   const [clientId, setClientId] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -104,7 +103,7 @@ export default function ChatUI() {
 
     es.onerror = () => {};
     return () => es.close();
-  }, [sessionId, user_id]);
+  }, [user_id]);
 
   // send handler
   const handleSend = async () => {
@@ -196,33 +195,51 @@ export default function ChatUI() {
               >
                 {messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
+                  const sideGap = isUser ? "mr-12" : "ml-12";
+                  const clean = sanitizeHtml(msg.content);
+                  const tableMode = isHtml(clean) && hasTable(clean);
+                  const isEmptyAssistantPlaceholder = !isUser && msg.isTypingPlaceholder && !msg.content.trim();
+                  if (isEmptyAssistantPlaceholder) {
+                    // Don’t render a bubble yet; TypingBubble handles the UX.
+                    return null;
+                  }
                   return (
-                    <div key={idx} className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-                      {/* Avatar */}
-                      {!isUser && (
-                        <div className="shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 ring-1 ring-white/20 shadow" />
-                      )}
-                      {/* Bubble */}
-                      <div
-                        className={`
-                          group rounded-2xl px-4 py-3 shadow-lg ring-1 min-w-0
-                          max-w-[80%] md:max-w-[70%]
-                          whitespace-pre-wrap break-words [overflow-wrap:anywhere]
-                          ${isUser
-                            ? "bg-gradient-to-br from-amber-500 to-orange-600 text-white ring-white/10 shadow-orange-900/20"
-                            : "bg-gradient-to-br from-fuchsia-500 to-violet-600 text-white ring-white/10 shadow-fuchsia-900/20 me-10"}
-                        `}
-                      >
-                        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">
-                          {isHtml(msg.content) ? <SafeHTML html={msg.content} /> : <span>{msg.content}</span>}
+                      <div key={idx} className="flex items-start gap-2">
+                        {/* Assistant avatar (left) */}
+                        {!isUser && (
+                          <div className="shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-slate-600 ring-1 ring-white/10 shadow" />
+                        )}
+
+                        {/* Bubble wrapper: can shrink but not collapse */}
+                        <div className={`min-w-0 flex-1 ${isUser ? "ml-auto" : ""}`}>
+                          <div
+                              className={[
+                                "relative isolate rounded-2xl px-4 py-3 shadow-lg ring-1 text-left",
+                                "min-w-[4rem] max-w-[55%] md:max-w-[45%]", // ensures a sensible minimum
+                                "whitespace-pre-wrap break-words leading-relaxed", // lets text wrap naturally
+                                isUser
+                                  ? "bg-gradient-to-br from-slate-600 to-slate-700 text-white ring-white/5 ml-auto"
+                                  : "bg-gradient-to-br from-indigo-600 to-slate-700 text-white ring-white/5",
+                              ].join(" ")}
+                            >
+                            {tableMode ? (
+                                  <div className="w-full max-w-full overflow-x-auto">
+                                    <SafeHTML html={clean} />
+                                  </div>
+                                ) : (
+                                  <div className="max-w-[70ch]">{isHtml(clean) ? <SafeHTML html={clean} /> : <span>{msg.content}</span>}</div>
+                                )}
+                              </div>
                         </div>
+
+                        {/* User avatar (right) */}
+                        {isUser && (
+                          <div className="shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 ring-1 ring-white/10 shadow" />
+                        )}
                       </div>
-                      {/* User avatar on right */}
-                      {isUser && (
-                        <div className="shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 ring-1 ring-white/20 shadow" />
-                      )}
-                    </div>
-                  );
+                    );
+
+
                 })}
 
                 {/* Typing indicator (outside the array so it never replaces messages) */}
@@ -238,8 +255,7 @@ export default function ChatUI() {
       </main>
 
       {/* Composer */}
-      <footer className="border-t border-white/10 bg-slate-900/50 backdrop-blur 
-      supports-[backdrop-filter]:bg-slate-900/50   mb-6 md:mb-10 pb-[max(0.5rem,env(safe-area-inset-bottom))] ">
+      <footer className="border-t border-white/10 bg-slate-900/50 backdrop-blur supports-[backdrop-filter]:bg-slate-900/50 mb-6 md:mb-10 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="max-w-5xl mx-auto px-4 py-4">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-2 shadow-xl flex items-end gap-2">
             <textarea
@@ -249,16 +265,12 @@ export default function ChatUI() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder="Type a message…"
-              className="flex-1 resize-none bg-transparent outline-none text-slate-100 placeholder:text-slate-400
-                         px-3 py-2 rounded-xl leading-6"
+              className="flex-1 resize-none bg-transparent outline-none text-slate-100 placeholder:text-slate-400 px-3 py-2 rounded-xl leading-6"
               aria-label="Message"
             />
             <Button
               onClick={handleSend}
-              className="rounded-xl px-5 py-2.5 font-medium
-                         bg-gradient-to-br from-fuchsia-500 to-indigo-600 text-white
-                         hover:from-fuchsia-400 hover:to-indigo-500
-                         shadow-lg shadow-indigo-900/30"
+              className="rounded-xl px-5 py-2.5 font-medium bg-gradient-to-br from-fuchsia-500 to-indigo-600 text-white hover:from-fuchsia-400 hover:to-indigo-500 shadow-lg shadow-indigo-900/30"
             >
               Send
             </Button>

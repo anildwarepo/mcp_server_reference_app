@@ -1,8 +1,12 @@
 # sse_bus.py
 import asyncio, json
-from typing import Dict, Optional
+from typing import Annotated, Dict, Optional
+import requests
 
 JSONRPC = "2.0"
+
+DAPR_HTTP_PORT = 3500
+
 
 def sse_event(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
@@ -35,6 +39,8 @@ class SessionManager:
 
     async def publish(self, session_id: str, msg: str) -> None:
         s = await self.get_or_create(session_id)
+        payload = {"session_id": session_id, "message": msg}
+        print("Publishing:", payload)
         await s.publish(msg)
 
     async def delete(self, session_id: str) -> bool:
@@ -66,6 +72,7 @@ def associate_user_session(user_id: str, session_id: str) -> None:
 
 def session_for_user(user_id: str) -> Optional[str]:
     return _USER_SESSION.get(user_id)
+
 
 # Convenience publishers
 async def publish_progress(session_id: str, token: str, progress: float) -> None:

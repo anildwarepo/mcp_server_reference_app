@@ -23,8 +23,8 @@ from azure.cosmos.aio import CosmosClient
 from azure.cosmos import PartitionKey, exceptions
 import uuid
 import httpx, re, sys
-from mcp_client import MCPClient
-from sse_bus import SESSIONS, sse_event, JSONRPC, publish_progress, publish_message, associate_user_session
+from .mcp_client import MCPClient
+from .sse_bus import SESSIONS, sse_event, JSONRPC, publish_progress, publish_message, associate_user_session
 from typing import Any, Dict, List
 
 load_dotenv()
@@ -88,7 +88,7 @@ def _normalize_session_id(raw: str | None, default: str = "default") -> str:
 async def sse_events(request: Request):
     sid = request.query_params.get("sid")  
     session_id = _normalize_session_id(sid)
-    print(f"[SSE OPEN] session={session_id} pod={POD} rev={REV}", flush=True)
+    print(f"[@app.get(/events)] session={session_id} pod={POD} rev={REV}", flush=True)
     session = await SESSIONS.get_or_create(session_id)
 
     async def event_stream():
@@ -101,18 +101,16 @@ async def sse_events(request: Request):
                 break
             try:
                 # wait up to heartbeat interval for next message
-                msg = await asyncio.wait_for(session.q.get(), timeout=heartbeat_every)
-
-                payload = {
-                    "jsonrpc": JSONRPC,
-                    "method": "notifications/message",
-                    "params": {
-                        "level": "info",
-                        "data": [{"type": "text", "text": str(uuid.uuid4())}],
-                    },
-                }
+                #msg = await asyncio.wait_for(session.q.get(), timeout=heartbeat_every)
+                try:
+                    msg = session.q.get_nowait()
+                    print(f"[@app.get(/events)] MCP CLIENT SSE YIELD session={session_id} msg={msg}...", flush=True)
+                except asyncio.QueueEmpty:
+                    yield "event: noevent\ndata: {}\n\n"
+                    await asyncio.sleep(heartbeat_every)
+                    continue
                 #msg = sse_event(payload, event="assistant")
-                print(f"[SSE YIELD] {msg}")
+                print(f"[@app.get(/events)] SSE YIELD {msg}")
                 yield msg
                 #await asyncio.sleep(5)
                 #session.q.task_done()
@@ -349,7 +347,7 @@ async def handle_user_query(user_id: str, user_query: str, session_id: str) -> D
             follow_up_choice = follow_up.choices[0]
             message = follow_up_choice.message
 
-        print(final_text)
+        print(f"[handle_user_query] Final assistant text: {final_text}")
         return {"llm_response": final_text}
 
     finally:
@@ -359,11 +357,10 @@ async def handle_user_query(user_id: str, user_query: str, session_id: str) -> D
 
 @app.post("/conversation/{user_id}")
 async def start_conversation(user_id: str, convo: ConversationIn,  request: Request):
-   sid = request.query_params.get("sid")  
-   ui_session = _normalize_session_id(sid)
-   associate_user_session(user_id, ui_session)          # optional mapping
-             # <-- key line
-   return await handle_user_query(user_id, convo.user_query, ui_session)
+   if not user_id:
+       return Response(content="user_id is required", status_code=400)
+   print(f"Starting conversation for user_id={user_id}")
+   return await handle_user_query(user_id, convo.user_query, session_id=user_id)
 
 
 

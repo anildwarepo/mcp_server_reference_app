@@ -1,10 +1,10 @@
 import datetime
 from dapr.actor import Actor, Remindable
 from dapr.actor import ActorProxy, ActorId 
-from task_manager_actor_interface import TaskManagerActorInterface
-from common_types import BackupConfig
-from backup_actor_interface import BackupActorInterface
-from cosmosdb_helper import cosmosdb_query_items, cosmosdb_create_item
+from .task_manager_actor_interface import TaskManagerActorInterface
+from .common_types import BackupConfig
+from .backup_actor_interface import BackupActorInterface
+from .cosmosdb_helper import cosmosdb_query_items, cosmosdb_create_item
 import asyncio
 import isodate
 import uuid

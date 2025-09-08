@@ -1,5 +1,3 @@
-
-
 import asyncio
 import uuid
 import re
@@ -14,7 +12,10 @@ import httpx
 from mcp import ClientSession, ListToolsResult
 from mcp.client.streamable_http import streamablehttp_client
 from collections import defaultdict
-from sse_bus import SESSIONS, sse_event, JSONRPC, publish_progress, publish_message, associate_user_session, session_for_user
+from .sse_bus import SESSIONS, sse_event, JSONRPC, publish_progress, publish_message, associate_user_session, session_for_user
+from shared.models import parse_notification_json, ProgressNotification, MessageNotification
+import mcp.types as types
+from mcp.shared.session import RequestResponder   
 
 class MCPClient:
     def __init__(self, mcp_endpoint: str):
@@ -27,181 +28,75 @@ class MCPClient:
         self._broadcast_session_id: str | None = None
 
 
+    async def _on_incoming(
+        self,
+        msg: RequestResponder[types.ServerRequest, types.ClientResult]
+            | types.ServerNotification
+            | Exception,
+    ) -> None:
+        # Errors from the stream
+        if isinstance(msg, Exception):
+            print(f"[mcp] incoming exception: {msg!r}", file=sys.stderr)
+            return
+
+        # Server requests (sampling/elicitation/etc). Ignore unless you support them.
+        if isinstance(msg, RequestResponder):
+            return
+
+        # Server notifications (what you want)
+        if isinstance(msg, types.ServerNotification):
+            root = msg.root
+            method = getattr(root, "method", None)
+            params = getattr(root, "params", None)
+
+            # Build the JSON shape your existing parser expects
+            if hasattr(params, "model_dump"):
+                params_json = params.model_dump(mode="json")
+            else:
+                params_json = params
+
+            payload = {"jsonrpc": "2.0", "method": method, "params": params_json}
+
+            try:
+                notif = parse_notification_json(json.dumps(payload))
+            except Exception as e:
+                print(f"[mcp] notification parse error: {e}", file=sys.stderr)
+                return
+
+            # PROGRESS
+            if isinstance(notif, ProgressNotification):
+                pct   = float(notif.params.progress)
+                token = notif.params.progressToken
+                target = session_for_user(notif.user_id) or self._broadcast_session_id
+                if target:
+                    await self._broadcast_progress(pct, target, token)
+                return
+
+            # MESSAGE
+            if isinstance(notif, MessageNotification):
+                target = session_for_user(notif.user_id) or self._broadcast_session_id
+                texts  = [d.text for d in notif.params.data]
+                level  = notif.params.level
+                if target:
+                    await self._broadcast_assistant(" ".join(t for t in texts if t), level, target)
+                return
+
     async def _broadcast_progress(self, progress: float, target: Optional[str] = None, token: Optional[str] = None) -> None:
         target = target or self._broadcast_session_id
-        print(f"_broadcast_progress session_id {target}")
+        print(f"mcp_client.py _broadcast_progress session_id {target}")
         if target:
             await publish_progress(target, token, progress)
 
     async def _broadcast_assistant(self, text: str, level: Optional[str] = None, target: Optional[str] = None) -> None:
         target = target or self._broadcast_session_id
-        print(f"_broadcast_assistant session_id {target}")
+        print(f"mcp_client.py _broadcast_assistant session_id {target}")
         if target:
             await publish_message(target, text, level)
 
     def set_broadcast_session(self, session_id: str) -> None:
         self._broadcast_session_id = session_id
     
-
-    async def progress_listener(self) -> None:
-        print(f"[SSE] starting listener for session {self.session_id}", file=sys.stderr, flush=True)
-        headers = {
-            "Mcp-Session-Id": self.session_id,
-            "Accept": "text/event-stream",
-            "Cache-Control": "no-cache",
-        }
-        timeout = httpx.Timeout(connect=30.0, read=None, write=None, pool=None)
-        transport = httpx.AsyncHTTPTransport(retries=0)
-        backoff = 2
-
-        def reset_frame():
-            return {"event": None, "data_lines": []}
-
-        while True:
-            try:
-                async with httpx.AsyncClient(timeout=timeout, transport=transport, http2=False) as client:
-                    async with client.stream("GET", self.mcp_endpoint, headers=headers) as resp:
-                        frame = reset_frame()
-
-                        async for raw_line in resp.aiter_lines():
-                            # DEBUG: see every wire line
-                            #print(f"[SSE] raw line: {raw_line}", file=sys.stderr, flush=True)
-
-                            if raw_line is None:
-                                continue
-                            line = raw_line.strip("\r")
-
-                            # Blank line → end of frame
-                            if line == "":
-                                if frame["data_lines"]:
-                                    data_str = "\n".join(frame["data_lines"])
-                                    try:
-                                        root = json.loads(data_str)
-                                    except json.JSONDecodeError:
-                                        frame = reset_frame()
-                                        continue
-
-                                    method = root.get("method")
-                                    params = root.get("params") or {}
-
-                                    # PROGRESS
-                                    if method == "notifications/progress" or (
-                                        "progress" in root and "progressToken" in root
-                                    ) or (
-                                        "progress" in params and "progressToken" in params
-                                    ):
-                                        pct = (params.get("progress") if params else root.get("progress"))
-                                        token = (params.get("progressToken") if params else root.get("progressToken"))
-                                        target = session_for_user(root.get("user_id")) or self._broadcast_session_id
-                                        if isinstance(pct, (int, float)) and target:
-                                            print(f"session {self.session_id} << progress {pct:.0%}", file=sys.stderr, flush=True)
-                                            await self._broadcast_progress(float(pct), target, token)
-
-                                    # MESSAGE
-                                    elif method == "notifications/message" and "params" in root:
-                                        target = session_for_user(root.get("user_id")) or self._broadcast_session_id
-                                        data = params.get("data", [])
-                                        texts = [d.get("text") for d in data if isinstance(d, dict) and d.get("type") == "text"]
-                                        text = " ".join([t for t in texts if t]) or "(message)"
-                                        level = params.get("level")
-                                        if target:
-                                            print(f"session {self.session_id} << message '{text}'", file=sys.stderr, flush=True)
-                                            await self._broadcast_assistant(text, level, target)
-
-                                frame = reset_frame()
-                                continue
-
-                            if line.startswith(":"):         # comment/heartbeat
-                                continue
-                            if line.startswith("event:"):
-                                frame["event"] = line[len("event:"):].strip()
-                                continue
-                            if line.startswith("data:"):
-                                frame["data_lines"].append(line[len("data:"):].lstrip())
-                                continue
-                            # ignore id:, retry:, etc.
-
-            except (httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
-                print("[progress-listener] timeout:", exc, file=sys.stderr)
-            except asyncio.CancelledError:
-                return
-            except Exception as exc:
-                print("[progress-listener] error:", exc, file=sys.stderr)
-
-            print(f"[progress-listener] reconnecting in {backoff}s …", file=sys.stderr)
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30)
-
-
-    async def progress_listener1(self) -> None:
-        """
-        SSE progress listener for the Streamable HTTP server.
-        Keeps reconnecting with exponential backoff on disconnects.
-        """
-
-        print(f"[SSE] starting listener for session {self.session_id}", file=sys.stderr, flush=True)
-        headers = {
-            "Mcp-Session-Id": self.session_id,
-            "Accept": "text/event-stream",
-            "Cache-Control": "no-cache",
-        }
-        timeout = httpx.Timeout(connect=30.0, read=None, write=None, pool=None)
-        transport = httpx.AsyncHTTPTransport(retries=0)
-        backoff = 2
-        while True:
-            try:
-                async with httpx.AsyncClient(timeout=timeout, transport=transport, http2=False) as client:
-                    async with client.stream("GET", self.mcp_endpoint, headers=headers) as resp:
-
-                        async for raw_line in resp.aiter_lines():
-                            print(f"[SSE] raw line: {raw_line}", file=sys.stderr, flush=True)
-                            # Ignore comment lines or "event:" lines we don't care about
-                            if raw_line.__contains__("ping") or raw_line == '' or raw_line == 'data: {}' or raw_line == 'event: open':
-                                continue
-                            
-                            if not raw_line.startswith("data:"):
-                                continue
-                            try:
-                                payload = raw_line[len("data:"):].lstrip()
-                                root = json.loads(payload)
-                            except json.JSONDecodeError:
-                                continue
-                            
-                            print(raw_line)
-                            params = root.get("params", {}) or {}
-                            method = root.get("method")
-                            if method == "notifications/progress" and "params" in root:
-                                pct = root["params"].get("progress")
-                                token = root["params"].get("progressToken")
-                                target = session_for_user(root.get("user_id"))
-                                if isinstance(pct, (int, float)):
-                                    print(f"session {self.session_id} << slow_count {pct:.0%}", file=sys.stderr, flush=True)
-                                    #await publish_progress(target, token, float(pct))
-                                    await self._broadcast_progress(float(pct), target, token)
-                            elif method == "notifications/message" and "params" in root:
-                                    # pull all text chunks
-                                target = session_for_user(root.get("user_id"))
-                                data = root["params"].get("data", [])
-                                texts = [d.get("text") for d in data if isinstance(d, dict) and d.get("type") == "text"]
-                                text = " ".join([t for t in texts if t]) or "(message)"
-                                level = root["params"].get("level")
-                                await self._broadcast_assistant(text, level, target)
-                            continue
-
-            except (httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
-                print("[progress-listener] timeout:", exc, file=sys.stderr)
-            except asyncio.CancelledError:
-                # Normal shutdown
-                return
-            except Exception as exc:
-                print("[progress-listener] error:", exc, file=sys.stderr)
-
-            # Reconnect with backoff
-            print(f"[progress-listener] reconnecting in {backoff}s …", file=sys.stderr)
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30)
-
-
+    
     async def connect(self, session_id: str, start_sse: bool = False) -> None:
         """
         Open the Streamable HTTP JSON-RPC channel (and optional SSE listener)
@@ -217,12 +112,15 @@ class MCPClient:
         read, write, _ = await self.exit_stack.enter_async_context(streamable_http_client)
 
         # Create the JSON-RPC session on the same exit stack
-        self.session = await self.exit_stack.enter_async_context(ClientSession(read, write))
+        #self.session = await self.exit_stack.enter_async_context(ClientSession(read, write))
+        self.session = await self.exit_stack.enter_async_context(
+            ClientSession(read, write, message_handler=self._on_incoming)
+        )
+        
         await self.session.initialize()
         await self.session.send_ping()
 
-        self._sse_task = asyncio.create_task(self.progress_listener())
-
+        self.session._message_handler
         # Discover tools
         self.mcp_tools = await self.session.list_tools()
 
