@@ -18,3 +18,8 @@ uvicorn --app-dir .. dapr_mcp_client.dapr_mcp_client_fastapi:app --port 8080 --r
 cd autonomous_agents_webapp
 npm run dev
 ```
+
+
+## Demo
+
+![alt text](image.png)
